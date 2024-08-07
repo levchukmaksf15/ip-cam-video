@@ -1,0 +1,204 @@
+package com.videotest.service;
+
+import com.googlecode.javacv.FrameGrabber;
+import com.googlecode.javacv.OpenCVFrameGrabber;
+import com.googlecode.javacv.cpp.opencv_core;
+import com.xuggle.mediatool.IMediaViewer;
+import com.xuggle.mediatool.IMediaWriter;
+import com.xuggle.mediatool.ToolFactory;
+import io.metaloom.video4j.Video4j;
+import io.metaloom.video4j.VideoFile;
+import io.metaloom.video4j.VideoFrame;
+import io.metaloom.video4j.Videos;
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+import javax.swing.*;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
+
+import static com.xuggle.xuggler.Global.DEFAULT_TIME_UNIT;
+
+@Service
+@Data
+@Slf4j
+public class VideoService {
+
+    private boolean statusVideoStreaming = false;
+    private static final String STREAM_VIDEO_RESOURCE = "rtsp://admin:ololo111!@192.168.1.107:554/Streaming/Channels/101";
+    private LocalDateTime startTime;
+    private List<LocalDateTime> trigerTimeList = new ArrayList<>();
+    private LocalDateTime finishTime;
+
+    private int imageWidth = 1920;
+    private int imageHeight = 1080;
+
+    private BlockingQueue<opencv_core.IplImage> videoImageQueue = new LinkedBlockingQueue<>();
+    private boolean grabberStatus;
+
+    private OpenCVFrameGrabber grabber;
+
+    public void cameraTest() {
+        statusVideoStreaming = true;
+        int initTimestamp = 0;
+
+        try {
+            initTimestamp = LocalTime.now().toSecondOfDay();
+            Thread threadGrab = new Thread(() -> {
+                log.info("Grab thread is started");
+                grabVideo();
+                log.info("Grab thread is finished");
+            });
+            Thread threadWrite = new Thread(() -> {
+                try {
+                    log.info("Writer thread is started");
+                    writeVideo("fullVideo");
+                    log.info("Writer thread is finished");
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+
+            threadGrab.start();
+            threadWrite.start();
+
+            threadGrab.join();
+            threadWrite.join();
+
+            log.info("All threads are joined");
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        } finally{
+            log.info("Time of stream: " + (LocalTime.now().toSecondOfDay() - initTimestamp));
+            try {
+                grabber.stop();
+            } catch (FrameGrabber.Exception e) {
+                throw new RuntimeException(e);
+            }
+            log.info("Grabber stopped");
+
+            startTime = null;
+            finishTime = null;
+            trigerTimeList.clear();
+        }
+    }
+
+    private void grabVideo() {
+        try {
+//            grabber.setFormat("mjpeg");
+            grabber = new OpenCVFrameGrabber(STREAM_VIDEO_RESOURCE);
+            grabber.start();
+            log.info("Grabber started");
+
+            opencv_core.IplImage iplImage = null;
+
+            while (statusVideoStreaming) {
+                iplImage = grabber.grab();
+                videoImageQueue.put(iplImage);
+            }
+        } catch (Exception exception) {
+            throw new RuntimeException();
+        }
+    }
+
+    private void writeVideo(String videoName) throws InterruptedException {
+        long nextFrameTime = 0;
+        long frameRate = DEFAULT_TIME_UNIT.convert(40, TimeUnit.MILLISECONDS);
+
+        IMediaWriter writer = ToolFactory.makeWriter(videoName + ".mov");
+        writer.addVideoStream(0, 0, imageWidth, imageHeight);
+        log.info("Writer is started");
+
+        while (statusVideoStreaming || !videoImageQueue.isEmpty()) {
+            writer.encodeVideo(0, videoImageQueue.take().getBufferedImage(), nextFrameTime, DEFAULT_TIME_UNIT);
+            nextFrameTime += frameRate;
+        }
+        writer.close();
+        log.info("Writer is close");
+    }
+
+    //    void videoCutting() {
+//        long nextFrameTime = 0;
+//        IMediaWriter writer = ToolFactory.makeWriter("test.mov");
+//        int counter = 0;
+//
+//    try (OpenCVFrameGrabber grabber = new OpenCVFrameGrabber("rtsp://admin:ololo111!@192.168.1.107:554/Streaming/Channels/101");
+//        Java2DFrameConverter converter = new Java2DFrameConverter()) {
+//            grabber.start();
+//            grabber.setFormat("mjpeg");
+////            grabber.setPixelFormat();
+//
+//            System.out.println("Video opened: ");
+//
+//            Frame frame = null;
+//
+//            while ((frame = grabber.grabImage()) != null || counter != 1000) {
+////                BufferedImage image = converter.getBufferedImage(frame);
+//                BufferedImage image = new BufferedImage(frame.imageWidth, frame.imageHeight, BufferedImage.TYPE_USHORT_555_RGB);
+//                Java2DFrameConverter.copy(frame, image);
+//
+//                writer.encodeVideo(0, image, nextFrameTime, DEFAULT_TIME_UNIT);
+//                nextFrameTime += grabber.getTimestamp();
+//
+//                counter++;
+//            }
+//        } catch (Exception exception) {
+//            exception.printStackTrace();
+//        } finally{
+//            writer.close();
+//        }
+//    }
+
+    void cutVideo(int second) {
+        Video4j.init();
+
+        try(VideoFile video = Videos.open("video.mp4")) {
+            double fps = video.fps();
+//            long totalFrames = video.length();
+
+            long firstFrame = (long) fps * second - 10;
+            long lastFrame = (long) fps * second + 5;
+
+            AtomicLong nextFrameTime = new AtomicLong();
+//            long frameRate = DEFAULT_TIME_UNIT.convert(500, TimeUnit.MILLISECONDS);
+            long frameRate = 1000 / (long) fps;
+            int width = video.width();
+            int height = video.height();
+
+//            video.seekToFrame(firstFrame);
+
+            List<VideoFrame> frames = new ArrayList<>();
+//            while (video.currentFrame() != lastFrame) {
+//                frames.add(video.currentFrame())
+//            }
+//            video.
+            IMediaWriter writer = ToolFactory.makeWriter("test.mov");
+            writer.addListener(ToolFactory.makeViewer(
+                    IMediaViewer.Mode.VIDEO_ONLY,
+                    true,
+                    WindowConstants.EXIT_ON_CLOSE
+            ));
+            writer.addVideoStream(0, 0, width, height);
+
+            video.streamFrames()
+                    .skip(firstFrame - 1)
+                    .filter(vf -> vf.number() <= lastFrame)
+                    .map(VideoFrame::toImage)
+                    .forEach(vf -> {
+                        writer.encodeVideo(0, vf, 0, DEFAULT_TIME_UNIT);
+                        nextFrameTime.addAndGet(frameRate);});
+
+//            PreviewGenerator gen = new PreviewGenerator(128, 3, 3);
+//            gen.preview(video);
+            writer.close();
+
+        }
+    }
+}
