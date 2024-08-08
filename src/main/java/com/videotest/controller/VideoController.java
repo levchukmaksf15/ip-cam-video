@@ -19,7 +19,6 @@ public class VideoController {
 
     @GetMapping("/start")
     public void startVideo() {
-        videoService.setStartTime(LocalDateTime.now());
         videoService.cameraTest();
     }
 
